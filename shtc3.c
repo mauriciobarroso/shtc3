@@ -47,12 +47,11 @@
 static const char *TAG = "shtc3";
 
 /* Private function prototypes -----------------------------------------------*/
-static uint8_t *get_buffer(uint16_t data);
 static int8_t i2c_read(uint16_t reg_addr, uint8_t *reg_data,
 		uint32_t data_len, void *intf);
 static int8_t i2c_write(uint16_t reg_addr, const uint8_t *reg_data,
 		uint32_t data_len, void *intf);
-static bool check_crc(uint8_t data[], uint8_t, uint8_t bytes_num, uint8_t checksum);
+static bool check_crc(uint8_t data[], uint8_t, uint8_t data_len, uint8_t checksum);
 static float calc_temp(uint16_t raw_temp);
 static float calc_hum(uint16_t raw_hum);
 
@@ -104,6 +103,18 @@ esp_err_t shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum) {
 	/* Variable to return */
 	esp_err_t ret = ESP_OK;
 
+	shtc3_wakeup(me);
+
+	i2c_write(SHTC3_MEAS_T_RH_CLOCKSTR, NULL, 0, me->i2c_dev);
+
+	vTaskDelay(pdMS_TO_TICKS(300));
+
+	uint8_t data[6] = {0};
+	i2c_read(0, data, 6, me->i2c_dev);
+
+	*temp = calc_temp((uint16_t)((data[0] << 8) | (data[1])));
+	*hum = calc_hum((uint16_t)((data[3] << 8) | (data[4])));
+
 	/* Return ESP_OK */
 	return ret;
 }
@@ -138,6 +149,10 @@ esp_err_t shtc3_wakeup(shtc3_t *const me) {
 	/* Variable to return */
 	esp_err_t ret = ESP_OK;
 
+	i2c_write(SHTC3_WAKEUP, NULL, 0, me->i2c_dev);
+
+	/* todo: write a delay instruction */
+
 	/* Return ESP_OK */
 	return ret;
 }
@@ -154,11 +169,11 @@ esp_err_t shtc3_soft_reset(shtc3_t *const me) {
 }
 
 /* Private function definitions ----------------------------------------------*/
-static bool check_crc(uint8_t data[], uint8_t, uint8_t bytes_num, uint8_t checksum) {
+static bool check_crc(uint8_t data[], uint8_t, uint8_t data_len, uint8_t checksum) {
 	uint8_t crc = 0xFF;
 
 	/* Calculates 8-bit checksum with given polynomial */
-	for (uint8_t i = 0; i < bytes_num; i++) {
+	for (uint8_t i = 0; i < data_len; i++) {
 		crc ^= data[i];
 
 		for (uint8_t j = 8; j > 0; --j) {
@@ -190,12 +205,12 @@ static float calc_hum(uint16_t raw_hum) {
 
 static int8_t i2c_read(uint16_t reg_addr, uint8_t *reg_data,
 		uint32_t data_len, void *intf) {
-
-	uint8_t reg[2] = {(reg_addr & 0xFF00 ) >> 8, reg_addr & 0x00FF};
-
 	i2c_bus_dev_t *dev = (i2c_bus_dev_t *)intf;
 
-	return dev->read(reg, 2, reg_data, data_len, intf);
+	uint8_t reg[2] = {(uint8_t)((reg_addr & 0xFF00 ) >> 8),
+			(uint8_t)(reg_addr & 0x00FF)};
+
+	return dev->read(reg_addr ? reg : NULL, reg_addr ? 2 : 0, reg_data, data_len, intf);
 }
 
 static int8_t i2c_write(uint16_t reg_addr, const uint8_t *reg_data,

@@ -47,7 +47,7 @@ extern "C" {
 #include "i2c_bus.h"
 
 /* Exported Macros -----------------------------------------------------------*/
-#define SHTC3_ADDR								0x70
+#define SHTC3_I2C_ADDR						0x70
 
 #define SHTC3_READ_ID							0xEFC8 /* command: read ID register */
 #define SHTC3_SOFT_RESET					0x805D /* soft reset */
