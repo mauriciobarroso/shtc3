@@ -79,9 +79,9 @@ static int8_t shtc3_reg_write(uint16_t data, void *intf);
 /**
  * @brief Function that implements a mili seconds delay
  *
- * @param period_ms: Time in us to delay
+ * @param time_ms: Time in us to delay
  */
-static void delay_ms(uint32_t period_ms);
+static void delay_ms(uint32_t time_ms);
 
 /**
  * @brief Function that generates a CRC byte for a given data
@@ -113,7 +113,6 @@ static float calc_hum(uint16_t raw_hum);
  */
 int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr)
 {
-
 	/* Variable to return error code */
 	int ret = 0;
 
@@ -130,7 +129,8 @@ int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr)
 		return ret;
 	}
 #else
-	me->i2c_dev = (I2C_HandleTypeDef *)i2c_handle;
+	me->i2c_dev.i2c_handle = (I2C_HandleTypeDef *)i2c_handle;
+	me->i2c_dev.dev_addr = SHTC3_I2C_ADDRESS;
 #endif /* ESP32_TARGET */
 
 	/* Return 0 */
@@ -260,13 +260,17 @@ int shtc3_soft_reset(shtc3_t *const me)
 static int8_t shtc3_reg_read(uint8_t *data, uint32_t data_len, void *intf)
 {
 #ifdef ESP32_TARGET
-	if (i2c_master_receive((i2c_master_dev_handle_t)intf, data, data_len, -1)
+	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
+
+	if (i2c_master_receive(i2c_dev, data, data_len, -1)
 			!= 0) {
 		return -1;
 	}
 #else
-	if (HAL_I2C_Master_Receive((I2C_HandleTypeDef*)intf,
-			(SHTC3_I2C_ADDR << 1) | 0x01, data, data_len, 100) > 0) {
+	i2c_stm32_dev_t *i2c_dev = (i2c_stm32_dev_t *)intf;
+
+	if (HAL_I2C_Master_Receive(i2c_dev->i2c_handle,
+			(i2c_dev->dev_addr << 1) | 0x01, data, data_len, 100) > 0) {
 		return -1;
 	}
 #endif /* ESP32_TARGET */
@@ -286,12 +290,16 @@ static int8_t shtc3_reg_write(uint16_t data, void *intf)
 
 	/* Transmit buffer */
 #ifdef ESP32_TARGET
-	if (i2c_master_transmit((i2c_master_dev_handle_t)intf, buffer, 2, -1)
+	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
+
+	if (i2c_master_transmit(i2c_dev, buffer, 2, -1)
 			!= 0) {
 		return -1;
 	}
 #else
-	if (HAL_I2C_Master_Transmit((I2C_HandleTypeDef*)intf, SHTC3_I2C_ADDR << 1,
+	i2c_stm32_dev_t *i2c_dev = (i2c_stm32_dev_t *)intf;
+
+	if (HAL_I2C_Master_Transmit(i2c_dev->i2c_handle, i2c_dev->dev_addr << 1,
 			buffer, 2, 100)) {
 		return -1;
 	}
@@ -302,12 +310,12 @@ static int8_t shtc3_reg_write(uint16_t data, void *intf)
 /**
  * @brief Function that implements a mili seconds delay
  */
-static void delay_ms(uint32_t period_ms)
+static void delay_ms(uint32_t time_ms)
 {
 #ifdef ESP32_TARGET
 	uint64_t m = (uint64_t)esp_timer_get_time();
 
-	uint32_t period_us = period_ms * 1000;
+	uint32_t period_us = time_ms * 1000;
 	if (period_us) {
 		uint64_t e = (m + period_us);
 
@@ -322,7 +330,7 @@ static void delay_ms(uint32_t period_ms)
 		}
 	}
 #else
-  HAL_Delay(period_ms);
+  HAL_Delay(time_ms);
 #endif /* ESP32_TARGET */
 }
 
