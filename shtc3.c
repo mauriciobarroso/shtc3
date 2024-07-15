@@ -129,8 +129,14 @@ int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr)
 		return ret;
 	}
 #else
-	me->i2c_dev.i2c_handle = (I2C_HandleTypeDef *)i2c_handle;
-	me->i2c_dev.dev_addr = SHTC3_I2C_ADDR;
+	me->i2c_dev = malloc(sizeof(i2c_stm32_dev_t));
+
+	if (me->i2c_dev == NULL) {
+		return -1;
+	}
+
+	me->i2c_dev->i2c_handle = (I2C_HandleTypeDef *)i2c_handle;
+	me->i2c_dev->dev_addr = SHTC3_I2C_ADDR;
 #endif /* ESP32_TARGET */
 
 	/* Return 0 */

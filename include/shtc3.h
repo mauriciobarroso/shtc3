@@ -87,7 +87,7 @@ typedef struct {
 #ifdef ESP32_TARGET
 	i2c_master_dev_handle_t i2c_dev;	/*!< I2C device handle */
 #else
-	i2c_stm32_dev_t i2c_dev;
+	i2c_stm32_dev_t *i2c_dev;
 #endif /* ESP32_TARGET */
 } shtc3_t;
 
