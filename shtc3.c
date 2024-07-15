@@ -20,7 +20,7 @@
   *
   * The above copyright notice and this permission notice shall be included in
   * all copies or substantial portions of the Software.
-  * 
+  *
   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -34,10 +34,18 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "shtc3.h"
+
+#ifdef ESP32_TARGET
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#endif /* ESP32_TARGET */
 
 /* Private macros ------------------------------------------------------------*/
+#define NOP()			asm volatile ("nop")
+#define CRC8_POLYNOMIAL	0x31
+#define CRC8_INIT 		0xFF
+#define CRC8_LEN 		1
 
 /* External variables --------------------------------------------------------*/
 
@@ -47,11 +55,55 @@
 static const char *TAG = "shtc3";
 
 /* Private function prototypes -----------------------------------------------*/
-static int8_t i2c_read(uint16_t reg_addr, uint8_t *reg_data,
-		uint32_t data_len, void *intf);
-static int8_t i2c_write(uint16_t reg_addr, const uint8_t *reg_data,
-		uint32_t data_len, void *intf);
-static bool check_crc(uint8_t data[], uint8_t, uint8_t data_len, uint8_t checksum);
+/**
+ * @brief Function that implements the default I2C read transaction
+ *
+ * @param data : Pointer to the data to be read from addr
+ * @param data_len : Length of the data transfer
+ * @param intf     : Pointer to the interface descriptor
+ *
+ * @return 0 if successful, non-zero otherwise
+ */
+static int8_t shtc3_reg_read(uint8_t *data, uint32_t data_len, void *intf);
+
+/**
+ * @brief Function that implements the default I2C write transaction
+ *
+ * @param data : Data (command) to be written to device
+ * @param intf : Pointer to the interface descriptor
+ *
+ * @return 0 if successful, non-zero otherwise
+ */
+static int8_t shtc3_reg_write(uint16_t data, void *intf);
+
+/**
+ * @brief Function that implements a mili seconds delay
+ *
+ * @param period_ms: Time in us to delay
+ */
+static void delay_ms(uint32_t period_ms);
+
+/**
+ * @brief Function that generates a CRC byte for a given data
+ *
+ * @param data  :
+ * @param count :
+ *
+ * @return CRC byte
+ */
+static uint8_t generate_crc(const uint8_t *data, uint16_t count);
+
+/**
+ * @brief Function that checks the CRC for the received data
+ *
+ * @param data     :
+ * @param count    :
+ * @param checksum :
+ *
+ * @return False on failure or True on success
+ */
+static bool check_crc(const uint8_t *data, uint16_t count, uint8_t checksum);
+
 static float calc_temp(uint16_t raw_temp);
 static float calc_hum(uint16_t raw_hum);
 
@@ -59,63 +111,86 @@ static float calc_hum(uint16_t raw_hum);
 /**
  * @brief Function to initialize a SHTC3 instance
  */
-esp_err_t shtc3_init(shtc3_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
-		i2c_bus_read_t read, i2c_bus_write_t write) {
-	/* Print initializing message */
-	ESP_LOGI(TAG, "Initializing SHTC3 instance...");
+int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr)
+{
 
-	/* Variable to return */
-	esp_err_t ret = ESP_OK;
+	/* Variable to return error code */
+	int ret = 0;
 
-	/* Add device to bus */
-	ret = i2c_bus_add_dev(i2c_bus, dev_addr, "shtc3", NULL, NULL);
+#ifdef ESP32_TARGET
+	/* Add device to I2C bus */
+	i2c_device_config_t i2c_dev_conf = {
+			.scl_speed_hz = 400000,
+			.device_address = dev_addr
+	};
 
-	if (ret != ESP_OK) {
-		ESP_LOGE(TAG, "Failed to add device");
+	if (i2c_master_bus_add_device((i2c_master_bus_handle_t)i2c_handle,
+			&i2c_dev_conf, &me->i2c_dev) != 0) {
+		ESP_LOGE(TAG, "Failed to add device to I2C bus");
 		return ret;
 	}
+#else
+	me->i2c_dev = (I2C_HandleTypeDef *)i2c_handle;
+#endif /* ESP32_TARGET */
 
-	/**/
-	me->i2c_dev = &i2c_bus->devs.dev[i2c_bus->devs.num - 1]; /* todo: write function to get the dev from name */
-
-	/* Print successful initialization message */
-	ESP_LOGI(TAG, "SHTC3 instance initialized successfully");
-
-	/* Return ESP_OK */
+	/* Return 0 */
 	return ret;
 }
 
 /**
  * @brief Function to get the device ID
  */
-esp_err_t shtc3_get_id(shtc3_t *const me) {
-	/* Variable to return */
-	esp_err_t ret = ESP_OK;
+int shtc3_get_id(shtc3_t *const me, uint16_t *id)
+{
+	/* Variable to return error code */
+	int ret = 0;
 
-	/* Return ESP_OK */
+	shtc3_reg_write(SHTC3_CMD_READ_ID, me->i2c_dev);
+
+	uint8_t data[3] = {0};
+	shtc3_reg_read(data, 3, me->i2c_dev);
+
+	/* Check data received CRC */
+	if (!check_crc(data, 2, data[2])) {
+		return -1;
+	}
+
+	*id = data[0] << 8 | data[1];
+
+	/* Return 0 */
 	return ret;
 }
 
 /**
  * @brief Function to get the temperature (°C) and humidity (%)
  */
-esp_err_t shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum) {
-	/* Variable to return */
-	esp_err_t ret = ESP_OK;
+int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum)
+{
+	/* Variable to return error code */
+	int ret = 0;
 
 	shtc3_wakeup(me);
 
-	i2c_write(SHTC3_MEAS_T_RH_CLOCKSTR, NULL, 0, me->i2c_dev);
+	shtc3_reg_write(SHTC3_CMD_MEAS_T_RH_CLOCKSTR_NM, me->i2c_dev);
 
-	vTaskDelay(pdMS_TO_TICKS(300));
+	delay_ms(300);
 
 	uint8_t data[6] = {0};
-	i2c_read(0, data, 6, me->i2c_dev);
+	shtc3_reg_read(data, 6, me->i2c_dev);
+
+	/* Check data received CRC */
+	if (!check_crc(&data[0], 2, data[2])) {
+		return -1;
+	}
+
+	if (!check_crc(&data[3], 2, data[5])) {
+		return -1;
+	}
 
 	*temp = calc_temp((uint16_t)((data[0] << 8) | (data[1])));
 	*hum = calc_hum((uint16_t)((data[3] << 8) | (data[4])));
 
-	/* Return ESP_OK */
+	/* Return 0 */
 	return ret;
 }
 
@@ -123,104 +198,176 @@ esp_err_t shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum) {
  * @brief Function to get the temperature (°C) and humidity (%). This function
  *        polls every 1 ms until measumente is ready
  */
-esp_err_t shtc3_get_temp_and_hum_polling(shtc3_t *const me, float *temp, float *hum) {
-	/* Variable to return */
-	esp_err_t ret = ESP_OK;
+int shtc3_get_temp_and_hum_polling(shtc3_t *const me, float *temp, float *hum)
+{
+	/* Variable to return error code */
+	int ret = 0;
 
-	/* Return ESP_OK */
+	/* todo: write */
+
+	/* Return 0 */
 	return ret;
 }
 
 /**
  * @brief Function to put the device in sleep mode
  */
-esp_err_t shtc3_sleep(shtc3_t *const me) {
-	/* Variable to return */
-	esp_err_t ret = ESP_OK;
+int shtc3_sleep(shtc3_t *const me)
+{
+	/* Variable to return error code */
+	int ret = 0;
 
-	/* Return ESP_OK */
+	shtc3_reg_write(SHTC3_CMD_SLEEP, me->i2c_dev);
+
+	/* Return 0 */
 	return ret;
 }
 
 /**
  * @brief Function to wakeup the device from sleep mode
  */
-esp_err_t shtc3_wakeup(shtc3_t *const me) {
-	/* Variable to return */
-	esp_err_t ret = ESP_OK;
+int shtc3_wakeup(shtc3_t *const me)
+{
+	/* Variable to return error code */
+	int ret = 0;
 
-	i2c_write(SHTC3_WAKEUP, NULL, 0, me->i2c_dev);
+	shtc3_reg_write(SHTC3_CMD_WAKEUP, me->i2c_dev);
 
-	/* todo: write a delay instruction */
+	delay_ms(1);
 
-	/* Return ESP_OK */
+	/* Return 0 */
 	return ret;
 }
 
 /**
  * @brief Function to perfrom a software reset of the device
  */
-esp_err_t shtc3_soft_reset(shtc3_t *const me) {
-	/* Variable to return */
-	esp_err_t ret = ESP_OK;
+int shtc3_soft_reset(shtc3_t *const me)
+{
+	/* Variable to return error code */
+	int ret = 0;
 
-	/* Return ESP_OK */
+	shtc3_reg_write(SHTC3_CMD_SOFT_RESET, me->i2c_dev);
+
+	/* Return 0 */
 	return ret;
 }
 
 /* Private function definitions ----------------------------------------------*/
-static bool check_crc(uint8_t data[], uint8_t, uint8_t data_len, uint8_t checksum) {
-	uint8_t crc = 0xFF;
+/**
+ * @brief Function that implements the default I2C read transaction
+ */
+static int8_t shtc3_reg_read(uint8_t *data, uint32_t data_len, void *intf)
+{
+#ifdef ESP32_TARGET
+	if (i2c_master_receive((i2c_master_dev_handle_t)intf, data, data_len, -1)
+			!= 0) {
+		return -1;
+	}
+#else
+	if (HAL_I2C_Master_Receive((I2C_HandleTypeDef*)intf,
+			(SHTC3_I2C_ADDR << 1) | 0x01, data, data_len, 100) > 0) {
+		return -1;
+	}
+#endif /* ESP32_TARGET */
 
-	/* Calculates 8-bit checksum with given polynomial */
-	for (uint8_t i = 0; i < data_len; i++) {
-		crc ^= data[i];
+	return 0;
+}
 
-		for (uint8_t j = 8; j > 0; --j) {
-			if (crc & 0x80) {
-				crc = (crc << 1) ^ SHTC3_CRC_POLYNOMIAL;
-			}
-			else {
-				crc <<= 1;
+/**
+ * @brief Function that implements the default I2C write transaction
+ */
+static int8_t shtc3_reg_write(uint16_t data, void *intf)
+{
+	uint8_t buffer[SHTC3_I2C_BUFFER_LEN_MAX] = {
+			(uint8_t)((data >> 8) & 0xFF),
+			(uint8_t)(data & 0xFF)
+	};
+
+	/* Transmit buffer */
+#ifdef ESP32_TARGET
+	if (i2c_master_transmit((i2c_master_dev_handle_t)intf, buffer, 2, -1)
+			!= 0) {
+		return -1;
+	}
+#else
+	if (HAL_I2C_Master_Transmit((I2C_HandleTypeDef*)intf, SHTC3_I2C_ADDR << 1,
+			buffer, 2, 100)) {
+		return -1;
+	}
+#endif /* ESP32_TARGET */
+	return 0;
+}
+
+/**
+ * @brief Function that implements a mili seconds delay
+ */
+static void delay_ms(uint32_t period_ms)
+{
+#ifdef ESP32_TARGET
+	uint64_t m = (uint64_t)esp_timer_get_time();
+
+	uint32_t period_us = period_ms * 1000;
+	if (period_us) {
+		uint64_t e = (m + period_us);
+
+		if (m > e) { /* overflow */
+			while ((uint64_t)esp_timer_get_time() > e) {
+				NOP();
 			}
 		}
-	}
 
-	/* Return false if the calculated checksum is different of the given checksum */
-	if (crc != checksum) {
+		while ((uint64_t)esp_timer_get_time() < e) {
+			NOP();
+		}
+	}
+#else
+  HAL_Delay(period_ms);
+#endif /* ESP32_TARGET */
+}
+
+/**
+ * @brief Function that generates a CRC byte for a given data
+ */
+static uint8_t generate_crc(const uint8_t *data, uint16_t count) {
+  uint16_t current_byte;
+  uint8_t crc = CRC8_INIT;
+  uint8_t crc_bit;
+
+  /* calculates 8-Bit checksum with given polynomial */
+  for (current_byte = 0; current_byte < count; ++current_byte) {
+  	crc ^= (data[current_byte]);
+
+  	for (crc_bit = 8; crc_bit > 0; --crc_bit) {
+  		if (crc & 0x80) {
+  			crc = (crc << 1) ^ CRC8_POLYNOMIAL;
+  		}
+  		else {
+  			crc = (crc << 1);
+  		}
+  	}
+  }
+  return crc;
+}
+
+/**
+ * @brief Function that checks the CRC for the received data
+ */
+static bool check_crc(const uint8_t *data, uint16_t count, uint8_t checksum) {
+	if (generate_crc(data, count) != checksum) {
 		return false;
 	}
 
-	/* Return true for no errors */
 	return true;
 }
 
-static float calc_temp(uint16_t raw_temp) {
-	return 175 * (float)raw_temp / 65536.0f - 45.0f; /* T = -45 + 175 * raw_temp / 2^16 */
+static float calc_temp(uint16_t raw_temp)
+{
+	return 175 * (float)raw_temp / 65536.0f - 45.0f;
 }
 
-static float calc_hum(uint16_t raw_hum) {
-  return 100 * (float)raw_hum / 65536.0f; /* RH = raw_hum / 2^16 * 100 */
+static float calc_hum(uint16_t raw_hum)
+{
+	return 100 * (float)raw_hum / 65536.0f;
 }
-
-static int8_t i2c_read(uint16_t reg_addr, uint8_t *reg_data,
-		uint32_t data_len, void *intf) {
-	i2c_bus_dev_t *dev = (i2c_bus_dev_t *)intf;
-
-	uint8_t reg[2] = {(uint8_t)((reg_addr & 0xFF00 ) >> 8),
-			(uint8_t)(reg_addr & 0x00FF)};
-
-	return dev->read(reg_addr ? reg : NULL, reg_addr ? 2 : 0, reg_data, data_len, intf);
-}
-
-static int8_t i2c_write(uint16_t reg_addr, const uint8_t *reg_data,
-		uint32_t data_len, void *intf) {
-	i2c_bus_dev_t *dev = (i2c_bus_dev_t *)intf;
-
-	uint8_t reg[2] = {(uint8_t)((reg_addr & 0xFF00 ) >> 8),
-			(uint8_t)(reg_addr & 0x00FF)};
-
-	return dev->write(reg, 2, reg_data, data_len, intf);
-}
-
 /***************************** END OF FILE ************************************/

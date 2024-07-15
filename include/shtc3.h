@@ -3,7 +3,7 @@
   * @file           : shtc3.h
   * @author         : Mauricio Barroso Benavides
   * @date           : Jul 18, 2023
-  * @brief          : todo: write brief 
+  * @brief          : todo: write brief
   ******************************************************************************
   * @attention
   *
@@ -20,7 +20,7 @@
   *
   * The above copyright notice and this permission notice shall be included in
   * all copies or substantial portions of the Software.
-  * 
+  *
   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -40,28 +40,48 @@
 extern "C" {
 #endif
 
+
 /* Includes ------------------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
-#include "i2c_bus.h"
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C2 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+#define ESP32_TARGET
+#endif
+
+#ifdef ESP32_TARGET
+#include "driver/i2c_master.h"
+#else
+#include "main.h"
+#endif /* ESP32_TARGET */
 
 /* Exported Macros -----------------------------------------------------------*/
 #define SHTC3_I2C_ADDR						0x70
+#define SHTC3_I2C_BUFFER_LEN_MAX			8
 
-#define SHTC3_READ_ID							0xEFC8 /* command: read ID register */
-#define SHTC3_SOFT_RESET					0x805D /* soft reset */
-#define SHTC3_SLEEP								0xB098 /* sleep */
-#define SHTC3_WAKEUP							0x3517 /* wakeup */
-#define SHTC3_MEAS_T_RH_POLLING		0x7866 /* meas. read T first, clock stretching disabled */
-#define SHTC3_MEAS_T_RH_CLOCKSTR	0x7CA2 /* meas. read T first, clock stretching enabled */
-#define SHTC3_MEAS_RH_T_POLLING		0x58E0 /* meas. read RH first, clock stretching disabled */
-#define SHTC3_MEAS_RH_T_CLOCKSTR	0x5C24 /* meas. read RH first, clock stretching enabled */
+#define SHTC3_CMD_READ_ID					0xEFC8 /* command: read ID register */
+#define SHTC3_CMD_SOFT_RESET				0x805D /* soft reset */
+#define SHTC3_CMD_SLEEP						0xB098 /* sleep */
+#define SHTC3_CMD_WAKEUP					0x3517 /* wakeup */
 
-#define SHTC3_CRC_POLYNOMIAL			0x131 /* P(x) = x^8 + x^5 + x^4 + 1 = 100110001 */
+#define SHTC3_CMD_MEAS_T_RH_POLLING_NM		0x7866 /* meas. read T first, clock stretching disabled in normal mode */
+#define SHTC3_CMD_MEAS_T_RH_CLOCKSTR_NM		0x7CA2 /* meas. read T first, clock stretching enabled in normal mode */
+#define SHTC3_CMD_MEAS_RH_T_POLLING_NM		0x58E0 /* meas. read RH first, clock stretching disabled in normal mode */
+#define SHTC3_CMD_MEAS_RH_T_CLOCKSTR_NM		0x5C24 /* meas. read RH first, clock stretching enabled in normal mode */
+#define SHTC3_CMD_MEAS_T_RH_POLLING_LPM		0x609C /* meas. read T first, clock stretching disabled in low power mode */
+#define SHTC3_CMD_MEAS_T_RH_CLOCKSTR_LPM	0x6458 /* meas. read T first, clock stretching enabled in low power mode */
+#define SHTC3_CMD_MEAS_RH_T_POLLING_LPM		0x401A /* meas. read RH first, clock stretching disabled in low power mode */
+#define SHTC3_CMD_MEAS_RH_T_CLOCKSTR_LPM	0x44DE /* meas. read RH first, clock stretching enabled in low power mode */
+
 /* Exported typedef ----------------------------------------------------------*/
 typedef struct {
-	i2c_bus_dev_t *i2c_dev;
+#ifdef ESP32_TARGET
+	i2c_master_dev_handle_t i2c_dev;	/*!< I2C device handle */
+#else
+	I2C_HandleTypeDef *i2c_dev;
+#endif /* ESP32_TARGET */
 	uint16_t id;
 } shtc3_t;
 
@@ -71,26 +91,24 @@ typedef struct {
 /**
  * @brief Function to initialize a SHTC3 instance
  *
- * @param me       : Pointer to a shtc3_t instance
- * @param i2c_bus  : Pointer to a structure with the data to initialize the
- * 								   I2C device
- * @param dev_addr : I2C device address
- * @param read     : Pointer to I2C read function
- * @param write    : Pointer to I2C write function
+ * @param me         : Pointer to a shtc3_t instance
+ * @param i2c_handle : Pointer to a structure with the data to initialize the
+ * 					   I2C device
+ * @param dev_addr   : I2C device address
  *
  * @return ESP_OK on success
  */
-esp_err_t shtc3_init(shtc3_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
-		i2c_bus_read_t read, i2c_bus_write_t write);
+int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr);
 
 /**
  * @brief Function to get the device ID
  *
  * @param me : Pointer to a shtc3_t instance
+ * @param id : Pointer to SHTC3 ID
  *
  * @return ESP_OK on success
  */
-esp_err_t shtc3_get_id(shtc3_t *const me);
+int shtc3_get_id(shtc3_t *const me, uint16_t *id);
 
 /**
  * @brief Function to get the temperature (°C) and humidity (%)
@@ -103,7 +121,7 @@ esp_err_t shtc3_get_id(shtc3_t *const me);
  *
  * @return ESP_OK on success
  */
-esp_err_t shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum);
+int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum);
 
 /**
  * @brief Function to get the temperature (°C) and humidity (%). This function
@@ -117,7 +135,7 @@ esp_err_t shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum);
  *
  * @return ESP_OK on success
  */
-esp_err_t shtc3_get_temp_and_hum_polling(shtc3_t *const me, float *temp, float *hum);
+int shtc3_get_temp_and_hum_polling(shtc3_t *const me, float *temp, float *hum);
 
 /**
  * @brief Function to put the device in sleep mode
@@ -126,7 +144,7 @@ esp_err_t shtc3_get_temp_and_hum_polling(shtc3_t *const me, float *temp, float *
  *
  * @return ESP_OK on success
  */
-esp_err_t shtc3_sleep(shtc3_t *const me);
+int shtc3_sleep(shtc3_t *const me);
 
 /**
  * @brief Function to wakeup the device from sleep mode
@@ -135,7 +153,7 @@ esp_err_t shtc3_sleep(shtc3_t *const me);
  *
  * @return ESP_OK on success
  */
-esp_err_t shtc3_wakeup(shtc3_t *const me);
+int shtc3_wakeup(shtc3_t *const me);
 
 /**
  * @brief Function to perfrom a software reset of the device
@@ -144,7 +162,7 @@ esp_err_t shtc3_wakeup(shtc3_t *const me);
  *
  * @return ESP_OK on success
  */
-esp_err_t shtc3_soft_reset(shtc3_t *const me);
+int shtc3_soft_reset(shtc3_t *const me);
 
 #ifdef __cplusplus
 }
