@@ -130,7 +130,7 @@ int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr)
 	}
 #else
 	me->i2c_dev.i2c_handle = (I2C_HandleTypeDef *)i2c_handle;
-	me->i2c_dev.dev_addr = SHTC3_I2C_ADDRESS;
+	me->i2c_dev.dev_addr = SHTC3_I2C_ADDR;
 #endif /* ESP32_TARGET */
 
 	/* Return 0 */
