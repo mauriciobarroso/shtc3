@@ -76,19 +76,17 @@ extern "C" {
 #define SHTC3_CMD_MEAS_RH_T_CLOCKSTR_LPM	0x44DE /* meas. read RH first, clock stretching enabled in low power mode */
 
 /* Exported typedef ----------------------------------------------------------*/
-#ifndef ESP32_TARGET
-typedef struct {
-	uint8_t dev_addr;
-	I2C_HandleTypeDef *i2c_handle;
-} i2c_stm32_dev_t;
-#endif /* ESP32_TARGET */
-
 typedef struct {
 #ifdef ESP32_TARGET
-	i2c_master_dev_handle_t i2c_dev;	/*!< I2C device handle */
+	i2c_master_dev_handle_t handle;
 #else
-	i2c_stm32_dev_t *i2c_dev;
+	uint8_t addr;
+	I2C_HandleTypeDef *handle;
 #endif /* ESP32_TARGET */
+} shtc3_i2c_t;
+
+typedef struct {
+	shtc3_i2c_t i2c_dev;
 } shtc3_t;
 
 /* Exported variables --------------------------------------------------------*/

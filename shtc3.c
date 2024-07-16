@@ -124,19 +124,13 @@ int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr)
 	};
 
 	if (i2c_master_bus_add_device((i2c_master_bus_handle_t)i2c_handle,
-			&i2c_dev_conf, &me->i2c_dev) != 0) {
+			&i2c_dev_conf, &me->i2c_dev.handle) != 0) {
 		ESP_LOGE(TAG, "Failed to add device to I2C bus");
 		return ret;
 	}
 #else
-	me->i2c_dev = malloc(sizeof(i2c_stm32_dev_t));
-
-	if (me->i2c_dev == NULL) {
-		return -1;
-	}
-
-	me->i2c_dev->i2c_handle = (I2C_HandleTypeDef *)i2c_handle;
-	me->i2c_dev->dev_addr = SHTC3_I2C_ADDR;
+	me->i2c_dev.handle = (I2C_HandleTypeDef *)i2c_handle;
+	me->i2c_dev.addr = SHTC3_I2C_ADDR;
 #endif /* ESP32_TARGET */
 
 	/* Return 0 */
@@ -151,10 +145,10 @@ int shtc3_get_id(shtc3_t *const me, uint16_t *id)
 	/* Variable to return error code */
 	int ret = 0;
 
-	shtc3_reg_write(SHTC3_CMD_READ_ID, me->i2c_dev);
+	shtc3_reg_write(SHTC3_CMD_READ_ID, &me->i2c_dev);
 
 	uint8_t data[3] = {0};
-	shtc3_reg_read(data, 3, me->i2c_dev);
+	shtc3_reg_read(data, 3, &me->i2c_dev);
 
 	/* Check data received CRC */
 	if (!check_crc(data, 2, data[2])) {
@@ -177,12 +171,12 @@ int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum)
 
 	shtc3_wakeup(me);
 
-	shtc3_reg_write(SHTC3_CMD_MEAS_T_RH_CLOCKSTR_NM, me->i2c_dev);
+	shtc3_reg_write(SHTC3_CMD_MEAS_T_RH_CLOCKSTR_NM, &me->i2c_dev);
 
 	delay_ms(300);
 
 	uint8_t data[6] = {0};
-	shtc3_reg_read(data, 6, me->i2c_dev);
+	shtc3_reg_read(data, 6, &me->i2c_dev);
 
 	/* Check data received CRC */
 	if (!check_crc(&data[0], 2, data[2])) {
@@ -223,7 +217,7 @@ int shtc3_sleep(shtc3_t *const me)
 	/* Variable to return error code */
 	int ret = 0;
 
-	shtc3_reg_write(SHTC3_CMD_SLEEP, me->i2c_dev);
+	shtc3_reg_write(SHTC3_CMD_SLEEP, &me->i2c_dev);
 
 	/* Return 0 */
 	return ret;
@@ -237,7 +231,7 @@ int shtc3_wakeup(shtc3_t *const me)
 	/* Variable to return error code */
 	int ret = 0;
 
-	shtc3_reg_write(SHTC3_CMD_WAKEUP, me->i2c_dev);
+	shtc3_reg_write(SHTC3_CMD_WAKEUP, &me->i2c_dev);
 
 	delay_ms(1);
 
@@ -253,7 +247,7 @@ int shtc3_soft_reset(shtc3_t *const me)
 	/* Variable to return error code */
 	int ret = 0;
 
-	shtc3_reg_write(SHTC3_CMD_SOFT_RESET, me->i2c_dev);
+	shtc3_reg_write(SHTC3_CMD_SOFT_RESET, &me->i2c_dev);
 
 	/* Return 0 */
 	return ret;
@@ -265,18 +259,16 @@ int shtc3_soft_reset(shtc3_t *const me)
  */
 static int8_t shtc3_reg_read(uint8_t *data, uint32_t data_len, void *intf)
 {
-#ifdef ESP32_TARGET
-	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
+	shtc3_i2c_t *i2c_dev = (shtc3_i2c_t *)intf;
 
-	if (i2c_master_receive(i2c_dev, data, data_len, -1)
+#ifdef ESP32_TARGET
+	if (i2c_master_receive(i2c_dev->handle, data, data_len, -1)
 			!= 0) {
 		return -1;
 	}
 #else
-	i2c_stm32_dev_t *i2c_dev = (i2c_stm32_dev_t *)intf;
-
-	if (HAL_I2C_Master_Receive(i2c_dev->i2c_handle,
-			(i2c_dev->dev_addr << 1) | 0x01, data, data_len, 100) > 0) {
+	if (HAL_I2C_Master_Receive(i2c_dev->handle, (i2c_dev->addr << 1) | 0x01,
+			data, data_len, 100) > 0) {
 		return -1;
 	}
 #endif /* ESP32_TARGET */
@@ -295,18 +287,16 @@ static int8_t shtc3_reg_write(uint16_t data, void *intf)
 	};
 
 	/* Transmit buffer */
-#ifdef ESP32_TARGET
-	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
+	shtc3_i2c_t *i2c_dev = (shtc3_i2c_t *)intf;
 
-	if (i2c_master_transmit(i2c_dev, buffer, 2, -1)
+#ifdef ESP32_TARGET
+	if (i2c_master_transmit(i2c_dev->handle, buffer, 2, -1)
 			!= 0) {
 		return -1;
 	}
 #else
-	i2c_stm32_dev_t *i2c_dev = (i2c_stm32_dev_t *)intf;
-
-	if (HAL_I2C_Master_Transmit(i2c_dev->i2c_handle, i2c_dev->dev_addr << 1,
-			buffer, 2, 100)) {
+	if (HAL_I2C_Master_Transmit(i2c_dev->handle, i2c_dev->addr << 1, buffer, 2,
+			100)) {
 		return -1;
 	}
 #endif /* ESP32_TARGET */
