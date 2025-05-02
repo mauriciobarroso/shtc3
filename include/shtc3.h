@@ -127,19 +127,6 @@ int shtc3_get_id(shtc3_t *const me, uint16_t *id);
  */
 int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum);
 
-/**
- * @brief Function to get the temperature (°C) and humidity (%). This function
- *        polls every 1 ms until measumente is ready
- *
- * @param me   : Pointer to a shtc3_t instance
- * @param temp : Pointer to floating point value, where the calculated
- *               temperature value will be stored
- * @param hum  : Pointer to floating point value, where the calculated
- *               humidity value will be stored
- *
- * @return ESP_OK on success
- */
-
  /**
  * @brief Function to get the temperature (°C) and humidity (%) in low
  *        power mode
@@ -154,6 +141,18 @@ int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum);
  */
 int shtc3_get_temp_and_hum_lpm(shtc3_t *const me, float *temp, float *hum);
 
+/**
+ * @brief Function to get the temperature (°C) and humidity (%). This function
+ *        polls every 1 ms until measumente is ready
+ *
+ * @param me   : Pointer to a shtc3_t instance
+ * @param temp : Pointer to floating point value, where the calculated
+ *               temperature value will be stored
+ * @param hum  : Pointer to floating point value, where the calculated
+ *               humidity value will be stored
+ *
+ * @return ESP_OK on success
+ */
 int shtc3_get_temp_and_hum_polling(shtc3_t *const me, float *temp, float *hum);
 
 /**
