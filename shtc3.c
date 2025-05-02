@@ -194,6 +194,40 @@ int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum)
 	return ret;
 }
 
+ /**
+ * @brief Function to get the temperature (°C) and humidity (%) in low
+ *        power mode
+ */
+ int shtc3_get_temp_and_hum_lpm(shtc3_t *const me, float *temp, float *hum)
+ {
+		/* Variable to return error code */
+		int ret = 0;
+
+		shtc3_wakeup(me);
+	
+		shtc3_reg_write(SHTC3_CMD_MEAS_T_RH_CLOCKSTR_LPM, &me->i2c_dev);
+	
+		delay_ms(1);
+	
+		uint8_t data[6] = {0};
+		shtc3_reg_read(data, 6, &me->i2c_dev);
+	
+		/* Check data received CRC */
+		if (!check_crc(&data[0], 2, data[2])) {
+			return -1;
+		}
+	
+		if (!check_crc(&data[3], 2, data[5])) {
+			return -1;
+		}
+	
+		*temp = calc_temp((uint16_t)((data[0] << 8) | (data[1])));
+		*hum = calc_hum((uint16_t)((data[3] << 8) | (data[4])));
+	
+		/* Return 0 */
+		return ret;
+ }
+
 /**
  * @brief Function to get the temperature (°C) and humidity (%). This function
  *        polls every 1 ms until measumente is ready
