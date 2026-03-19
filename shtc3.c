@@ -77,13 +77,6 @@ static int8_t shtc3_reg_read(uint8_t *data, uint32_t data_len, void *intf);
 static int8_t shtc3_reg_write(uint16_t data, void *intf);
 
 /**
- * @brief Function that implements a mili seconds delay
- *
- * @param time_ms: Time in us to delay
- */
-static void delay_ms(uint32_t time_ms);
-
-/**
  * @brief Function that generates a CRC byte for a given data
  *
  * @param data  :
@@ -111,10 +104,17 @@ static float calc_hum(uint16_t raw_hum);
 /**
  * @brief Function to initialize a SHTC3 instance
  */
-int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr)
+int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr, void (* delay_ms)(uint32_t))
 {
 	/* Variable to return error code */
 	int ret = 0;
+
+	/* Check custom delay_ms and fill field */
+	if (delay_ms == NULL) {
+		return -1;
+	}
+	
+	me->delay_ms = delay_ms;
 
 #ifdef ESP32_TARGET
 	/* Add device to I2C bus */
@@ -173,7 +173,7 @@ int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum)
 
 	shtc3_reg_write(SHTC3_CMD_MEAS_T_RH_CLOCKSTR_NM, &me->i2c_dev);
 
-	delay_ms(300);
+	me->delay_ms(300);
 
 	uint8_t data[6] = {0};
 	shtc3_reg_read(data, 6, &me->i2c_dev);
@@ -207,7 +207,7 @@ int shtc3_get_temp_and_hum(shtc3_t *const me, float *temp, float *hum)
 	
 		shtc3_reg_write(SHTC3_CMD_MEAS_T_RH_CLOCKSTR_LPM, &me->i2c_dev);
 	
-		delay_ms(1);
+		me->delay_ms(1);
 	
 		uint8_t data[6] = {0};
 		shtc3_reg_read(data, 6, &me->i2c_dev);
@@ -267,7 +267,7 @@ int shtc3_wakeup(shtc3_t *const me)
 
 	shtc3_reg_write(SHTC3_CMD_WAKEUP, &me->i2c_dev);
 
-	delay_ms(1);
+	me->delay_ms(1);
 
 	/* Return 0 */
 	return ret;
@@ -335,33 +335,6 @@ static int8_t shtc3_reg_write(uint16_t data, void *intf)
 	}
 #endif /* ESP32_TARGET */
 	return 0;
-}
-
-/**
- * @brief Function that implements a mili seconds delay
- */
-static void delay_ms(uint32_t time_ms)
-{
-#ifdef ESP32_TARGET
-	uint64_t m = (uint64_t)esp_timer_get_time();
-
-	uint32_t period_us = time_ms * 1000;
-	if (period_us) {
-		uint64_t e = (m + period_us);
-
-		if (m > e) { /* overflow */
-			while ((uint64_t)esp_timer_get_time() > e) {
-				NOP();
-			}
-		}
-
-		while ((uint64_t)esp_timer_get_time() < e) {
-			NOP();
-		}
-	}
-#else
-  HAL_Delay(time_ms);
-#endif /* ESP32_TARGET */
 }
 
 /**

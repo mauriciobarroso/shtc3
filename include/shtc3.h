@@ -87,6 +87,7 @@ typedef struct {
 
 typedef struct {
 	shtc3_i2c_t i2c_dev;
+  void (* delay_ms)(uint32_t);
 } shtc3_t;
 
 /* Exported variables --------------------------------------------------------*/
@@ -99,10 +100,11 @@ typedef struct {
  * @param i2c_handle : Pointer to a structure with the data to initialize the
  * 					   I2C device
  * @param dev_addr   : I2C device address
+ * @param delay_ms   : Pointer to custom delay function in ms
  *
  * @return ESP_OK on success
  */
-int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr);
+int shtc3_init(shtc3_t *const me, void *i2c_handle, uint8_t dev_addr, void (* delay_ms)(uint32_t));
 
 /**
  * @brief Function to get the device ID
